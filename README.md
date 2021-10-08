@@ -1,5 +1,13 @@
+```rust
+// main.rs
+let mut rt = Runtime::new("testdata/basic.js".to_owned());
+// Can be a well defined serde serializable type with some
+// type generic magic.
+let value: serde_json::Value = rt.call().await?;
+```
+
 ```javascript
-// basic.js
+// testdata/basic.js
 export async function verify() {
   const r = await fetch("https://jsonplaceholder.typicode.com/todos/5");
   return await r.json();
