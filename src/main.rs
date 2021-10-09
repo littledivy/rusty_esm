@@ -5,7 +5,16 @@ pub use crate::module_loader::EmbeddedModuleLoader;
 use crate::runtime::Runtime;
 
 use deno_core::error::AnyError;
+use serde::Deserialize;
 use std::path::Path;
+
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+  user_id: isize,
+  id: isize,
+  title: String,
+  completed: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
@@ -15,7 +24,7 @@ async fn main() -> Result<(), AnyError> {
     .to_string();
 
   let mut rt = Runtime::new(js_path)?;
-  let value = rt.call().await?;
+  let value: ApiResponse = rt.call(5).await?;
   println!("{:#?}", value);
   Ok(())
 }

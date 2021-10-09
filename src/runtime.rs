@@ -11,7 +11,10 @@ use deno_runtime::ops::reg_async;
 use deno_runtime::permissions::Permissions;
 use deno_runtime::worker::MainWorker;
 use deno_runtime::worker::WorkerOptions;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -30,9 +33,11 @@ pub struct Runtime {
 impl Runtime {
   pub fn new(source_file: String) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-
-    let source =
-      format!("import {{ verify }} from '{}';{}", source_file, BOILERPLATE);
+    let fn_name = "hello";
+    let source = format!(
+      "import {{ {} as __fn }} from '{}';{}",
+      fn_name, source_file, BOILERPLATE
+    );
 
     let module_loader = Rc::new(EmbeddedModuleLoader(
       source,
@@ -85,28 +90,38 @@ impl Runtime {
     })
   }
 
-  pub async fn call(&mut self) -> Result<Value, AnyError> {
+  pub async fn call<R, T>(&mut self, argument: R) -> Result<T, AnyError>
+  where
+    R: Serialize + 'static,
+    T: Debug + DeserializeOwned + 'static,
+  {
     {
       let rt = &mut self.worker.js_runtime;
 
-      async fn op_recv_args(
+      async fn op_recv_args<R>(
         state: Rc<RefCell<OpState>>,
         _args: (),
         _: (),
-      ) -> Result<Value, AnyError> {
+      ) -> Result<R, AnyError>
+      where
+        R: Serialize + 'static,
+      {
         let mut state = state.borrow_mut();
-        let args = state.take::<Value>();
+        let args = state.take::<R>();
         Ok(args)
       }
 
-      async fn op_result(
+      async fn op_result<T>(
         state: Rc<RefCell<OpState>>,
-        args: Value,
+        args: T,
         _: (),
-      ) -> Result<(), AnyError> {
+      ) -> Result<(), AnyError>
+      where
+        T: Debug + DeserializeOwned + 'static,
+      {
         let tx = {
           let mut state = state.borrow_mut();
-          let tx = state.take::<Sender<Value>>();
+          let tx = state.take::<Sender<T>>();
 
           tx
         };
@@ -114,27 +129,27 @@ impl Runtime {
         Ok(())
       }
 
-      reg_async(rt, "op_recv_args", op_recv_args);
-      reg_async(rt, "op_result", op_result);
+      reg_async(rt, "op_recv_args", op_recv_args::<R>);
+      reg_async(rt, "op_result", op_result::<T>);
       rt.sync_ops_cache();
     }
 
     self.worker.bootstrap(&self.options);
     self.worker.execute_main_module(&self.module).await?;
 
-    let (tx, mut rx) = mpsc::channel::<Value>(16);
+    let (tx, mut rx) = mpsc::channel::<T>(16);
 
     {
       let rt = &mut self.worker.js_runtime;
 
       rt.execute_script(
         "<anon>",
-        "window.dispatchEvent(new CustomEvent('verify'))",
+        "window.dispatchEvent(new CustomEvent('__start'))",
       )
       .unwrap();
 
-      rt.op_state().borrow_mut().put::<Sender<Value>>(tx.clone());
-      rt.op_state().borrow_mut().put::<Value>(json!({ "rid": 0 }));
+      rt.op_state().borrow_mut().put::<Sender<T>>(tx.clone());
+      rt.op_state().borrow_mut().put::<R>(argument);
     }
 
     self.worker.run_event_loop(false).await?;
@@ -145,9 +160,9 @@ impl Runtime {
 }
 
 const BOILERPLATE: &str = r#"
-window.addEventListener("verify", async () => {
-    const { rid } = await Deno.core.opAsync("op_recv_args");
-    const result = await verify();
+window.addEventListener("__start", async () => {
+    const argument = await Deno.core.opAsync("op_recv_args");
+    const result = await __fn(argument);
     Deno.core.opAsync("op_result", result);
 });
 "#;
