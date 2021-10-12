@@ -24,7 +24,7 @@ async fn main() -> Result<(), AnyError> {
     .to_string();
 
   let mut rt = Runtime::new(js_path)?;
-  let value: ApiResponse = rt.call(5).await?;
+  let value: usize = rt.call(5).await?;
   println!("{:#?}", value);
   Ok(())
 }

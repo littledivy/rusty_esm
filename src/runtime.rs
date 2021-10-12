@@ -2,6 +2,7 @@ use crate::module_loader::EmbeddedModuleLoader;
 use deno_core::error::AnyError;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
+use deno_core::v8;
 use deno_core::FsModuleLoader;
 use deno_core::ModuleSpecifier;
 use deno_core::OpState;
@@ -90,6 +91,7 @@ impl Runtime {
     })
   }
 
+  #[cfg(feature = "op")]
   pub async fn call<R, T>(&mut self, argument: R) -> Result<T, AnyError>
   where
     R: Serialize + 'static,
@@ -157,12 +159,89 @@ impl Runtime {
 
     Ok(result)
   }
+
+  #[cfg(feature = "rusty_v8")]
+  pub async fn call<R, T>(&mut self, argument: R) -> Result<T, AnyError>
+  where
+    R: Serialize + 'static,
+    T: Debug + DeserializeOwned + 'static,
+  {
+    use std::task::Poll;
+
+    self.worker.bootstrap(&self.options);
+    self.worker.execute_main_module(&self.module).await?;
+
+    let rt = &mut self.worker.js_runtime;
+
+    let func = rt.execute_script("<anon>", "__fn")?;
+    
+    let scope = &mut rt.handle_scope();
+    
+    let argument = deno_core::serde_v8::to_v8(scope, argument)?;
+    let func_obj = func.get(scope).to_object(scope).unwrap();
+    let func = v8::Local::<v8::Function>::try_from(func_obj)?;
+
+    let tc = &mut v8::TryCatch::new(scope);
+    let undefined = v8::undefined(tc);
+    let result = func.call(tc, undefined.into(), &[argument]);
+    rt.run_event_loop(false).await?;
+    
+    let result: T = match result {
+      Some(local) => {
+        //rt.run_event_loop(false).await?;
+        //let local = deno_core::futures::future::poll_fn(|cx| {
+          //let state = rt.poll_event_loop(cx, false);
+          
+          ////let scope = rt.handle_scope();
+          //match v8::Local::<v8::Promise>::try_from(local) {
+          //  Ok(promise) => match promise.state() {
+          //    v8::PromiseState::Pending => match state {
+          //      Poll::Ready(Ok(_)) => Poll::Ready(Err(())),
+          //      Poll::Ready(Err(_)) => Poll::Ready(Err(())),
+          //      Poll::Pending => Poll::Pending,
+          //    },
+          //   v8::PromiseState::Fulfilled => {
+          //      let value = promise.result(&mut tc);
+          //      let value_handle = v8::Local::new(&mut tc, value);
+          //      Poll::Ready(Ok(value_handle))
+          //    }
+          //    v8::PromiseState::Rejected => {
+          //      let exception = promise.result(&mut tc);
+          //      Poll::Ready(Err(()))
+          //    }
+          //  },
+          // _ => Poll::Ready(Ok(local)),
+          //}
+        //})
+        //.await.unwrap();
+        let local = match v8::Local::<v8::Promise>::try_from(local) {
+            Ok(promise) => {
+                assert_eq!(promise.state(), v8::PromiseState::Fulfilled);
+                let value = promise.result(tc);
+                let value_handle = v8::Local::new(tc, value);
+                value_handle
+            },
+            _ => local,
+        };
+
+        deno_core::serde_v8::from_v8(tc, local)?
+      }
+      None => panic!("Something went wrong"),
+    };
+
+    Ok(result)
+  }
 }
 
+#[cfg(feature = "op")]
 const BOILERPLATE: &str = r#"
 window.addEventListener("__start", async () => {
     const argument = await Deno.core.opAsync("op_recv_args");
     const result = await __fn(argument);
     Deno.core.opAsync("op_result", result);
-});
+"#;
+
+#[cfg(feature = "rusty_v8")]
+const BOILERPLATE: &str = r#"
+globalThis.__fn = __fn;
 "#;
