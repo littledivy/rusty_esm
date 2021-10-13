@@ -32,9 +32,8 @@ pub struct Runtime {
 }
 
 impl Runtime {
-  pub fn new(source_file: String) -> Result<Self, AnyError> {
+  pub fn new(fn_name: &str, source_file: &str) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-    let fn_name = "hello";
     let source = format!(
       "import {{ {} as __fn }} from '{}';{}",
       fn_name, source_file, BOILERPLATE
