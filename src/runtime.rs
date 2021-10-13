@@ -2,6 +2,7 @@ use crate::module_loader::EmbeddedModuleLoader;
 use deno_core::error::AnyError;
 use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
+use deno_core::v8;
 use deno_core::FsModuleLoader;
 use deno_core::ModuleSpecifier;
 use deno_core::OpState;
@@ -31,9 +32,8 @@ pub struct Runtime {
 }
 
 impl Runtime {
-  pub fn new(source_file: String) -> Result<Self, AnyError> {
+  pub fn new(fn_name: &str, source_file: &str) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-    let fn_name = "hello";
     let source = format!(
       "import {{ {} as __fn }} from '{}';{}",
       fn_name, source_file, BOILERPLATE
@@ -90,6 +90,7 @@ impl Runtime {
     })
   }
 
+  #[cfg(feature = "op")]
   pub async fn call<R, T>(&mut self, argument: R) -> Result<T, AnyError>
   where
     R: Serialize + 'static,
@@ -157,12 +158,60 @@ impl Runtime {
 
     Ok(result)
   }
+
+  #[cfg(feature = "rusty_v8")]
+  pub async fn call<R, T>(&mut self, arguments: &[R]) -> Result<T, AnyError>
+  where
+    R: Serialize + 'static,
+    T: Debug + DeserializeOwned + 'static,
+  {
+    use std::task::Poll;
+
+    self.worker.bootstrap(&self.options);
+    self.worker.execute_main_module(&self.module).await?;
+
+    let rt = &mut self.worker.js_runtime;
+
+    let func = rt.execute_script("<anon>", "__fn")?;
+
+    let global = {
+      let scope = &mut rt.handle_scope();
+      let arguments: Vec<v8::Local<v8::Value>> = arguments
+        .iter()
+        .map(|argument| deno_core::serde_v8::to_v8(scope, argument).unwrap())
+        .collect();
+
+      let func_obj = func.get(scope).to_object(scope).unwrap();
+      let func = v8::Local::<v8::Function>::try_from(func_obj)?;
+
+      let undefined = v8::undefined(scope);
+      let local = func.call(scope, undefined.into(), &arguments).unwrap();
+
+      v8::Global::new(scope, local)
+    };
+
+    let result: T = {
+      // Run the event loop.
+      let value = rt.resolve_value(global).await?;
+      let scope = &mut rt.handle_scope();
+
+      let value = v8::Local::new(scope, value);
+      deno_core::serde_v8::from_v8(scope, value)?
+    };
+
+    Ok(result)
+  }
 }
 
+#[cfg(feature = "op")]
 const BOILERPLATE: &str = r#"
 window.addEventListener("__start", async () => {
     const argument = await Deno.core.opAsync("op_recv_args");
     const result = await __fn(argument);
     Deno.core.opAsync("op_result", result);
-});
+"#;
+
+#[cfg(feature = "rusty_v8")]
+const BOILERPLATE: &str = r#"
+globalThis.__fn = __fn;
 "#;

@@ -19,12 +19,12 @@ struct ApiResponse {
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
   let js_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-    .join("testdata/basic.js")
+    .join("testdata/async.js")
     .to_string_lossy()
     .to_string();
 
-  let mut rt = Runtime::new(js_path)?;
-  let value: ApiResponse = rt.call(5).await?;
+  let mut rt = Runtime::new("hello", &js_path)?;
+  let value: [ApiResponse; 2] = rt.call(&[5, 4]).await?;
   println!("{:#?}", value);
   Ok(())
 }

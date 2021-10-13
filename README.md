@@ -8,14 +8,14 @@ struct ApiResponse {
   completed: bool,
 }
 
-let mut rt = Runtime::new("testdata/basic.js".to_owned());
-let user_id = 5;
-let value: ApiResponse = rt.call(5).await?;
+let mut rt = Runtime::new("getStuff", "testdata/basic.js");
+let id = 5;
+let value: ApiResponse = rt.call(&[id]).await?;
 ```
 
 ```javascript
 // testdata/basic.js
-export async function hello(id) {
+export async function getStuff(id) {
   const r = await fetch("https://jsonplaceholder.typicode.com/todos/" + id);
   return await r.json();
 }
