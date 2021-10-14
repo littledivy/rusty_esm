@@ -1,25 +1,18 @@
 use crate::module_loader::EmbeddedModuleLoader;
 use deno_core::error::AnyError;
-use deno_core::serde_json::json;
-use deno_core::serde_json::Value;
 use deno_core::v8;
 use deno_core::FsModuleLoader;
-use deno_core::ModuleSpecifier;
-use deno_core::OpState;
+
 use deno_runtime::deno_broadcast_channel::InMemoryBroadcastChannel;
 use deno_runtime::deno_web::BlobStore;
-use deno_runtime::ops::reg_async;
 use deno_runtime::permissions::Permissions;
 use deno_runtime::worker::MainWorker;
 use deno_runtime::worker::WorkerOptions;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
 
 fn get_error_class_name(e: &AnyError) -> &'static str {
   deno_runtime::errors::get_error_class_name(e).unwrap_or("Error")
@@ -32,8 +25,10 @@ pub struct Runtime {
 impl Runtime {
   pub async fn new(source_file: &str) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-    let source =
-      format!("import * as mod from '{}';{}", source_file, BOILERPLATE);
+    let source = format!(
+      "import * as mod from '{}'; globalThis.mod = mod;",
+      source_file
+    );
 
     let module_loader = Rc::new(EmbeddedModuleLoader(
       source,
@@ -126,16 +121,3 @@ impl Runtime {
     Ok(result)
   }
 }
-
-#[cfg(feature = "op")]
-const BOILERPLATE: &str = r#"
-window.addEventListener("__start", async () => {
-    const argument = await Deno.core.opAsync("op_recv_args");
-    const result = await __fn(argument);
-    Deno.core.opAsync("op_result", result);
-"#;
-
-#[cfg(feature = "rusty_v8")]
-const BOILERPLATE: &str = r#"
-globalThis.mod = mod;
-"#;
