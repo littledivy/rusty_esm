@@ -57,7 +57,10 @@ async fn main() -> Result<(), AnyError> {
   let mut rt = Runtime::new(&js_path, &["sum", "product"]).await?;
   let sum: i32 = rt.call("sum", &[4, 5]).await?;
   let product: i32 = rt.call("product", &[4, 5]).await?;
-  println!("Multi export: sum of 4 and 5 is: {}, {}", sum, product);
+  println!(
+    "Multi export: sum of 4 and 5 is: {}, and product is: {}",
+    sum, product
+  );
 
   Ok(())
 }
