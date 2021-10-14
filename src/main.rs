@@ -24,7 +24,7 @@ async fn main() -> Result<(), AnyError> {
     .to_string_lossy()
     .to_string();
 
-  let mut rt = Runtime::new(&js_path).await?;
+  let mut rt = Runtime::new(&js_path, &["hello"]).await?;
   let value: [ApiResponse; 2] = rt.call("hello", &[5, 4]).await?;
 
   println!("Basic: {:#?}", value);
@@ -34,7 +34,7 @@ async fn main() -> Result<(), AnyError> {
     .to_string_lossy()
     .to_string();
 
-  let mut rt = Runtime::new(&js_path).await?;
+  let mut rt = Runtime::new(&js_path, &["handler"]).await?;
 
   // Multi typed argument and return values.
   let value: Vec<Value> = rt
@@ -48,6 +48,16 @@ async fn main() -> Result<(), AnyError> {
     .await?;
 
   println!("Heterogeneous: {:#?}", value);
+
+  let js_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("examples/multi_export.js")
+    .to_string_lossy()
+    .to_string();
+
+  let mut rt = Runtime::new(&js_path, &["sum", "product"]).await?;
+  let sum: i32 = rt.call("sum", &[4, 5]).await?;
+  let product: i32 = rt.call("product", &[4, 5]).await?;
+  println!("Multi export: sum of 4 and 5 is: {}, {}", sum, product);
 
   Ok(())
 }

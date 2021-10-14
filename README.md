@@ -8,7 +8,7 @@ struct ApiResponse {
   completed: bool,
 }
 
-let mut rt = Runtime::new("testdata/basic.js").await?;
+let mut rt = Runtime::new("testdata/basic.js", &["getStuff"]).await?;
 let id = 5;
 let value: ApiResponse = rt.call("getStuff", &[id]).await?;
 ```

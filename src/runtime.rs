@@ -30,10 +30,24 @@ pub struct Runtime {
 }
 
 impl Runtime {
-  pub async fn new(source_file: &str) -> Result<Self, AnyError> {
+  pub async fn new(
+    source_file: &str,
+    exported_functions: &[&str],
+  ) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-    let source =
-      format!("import * as mod from '{}';{}", source_file, BOILERPLATE);
+    let source = {
+      let global_this_setter: String = exported_functions
+        .iter()
+        .map(|fn_name| format!("globalThis.{} = {};", fn_name, fn_name))
+        .collect();
+
+      format!(
+        r#"import {{ {} }} from "{}"; {}"#,
+        exported_functions.join(", "),
+        source_file,
+        global_this_setter
+      )
+    };
 
     let module_loader = Rc::new(EmbeddedModuleLoader(
       source,
@@ -96,7 +110,7 @@ impl Runtime {
   {
     let rt = &mut self.worker.js_runtime;
 
-    let func = rt.execute_script("<anon>", &format!("mod.{}", fn_name))?;
+    let func = rt.execute_script("<anon>", fn_name)?;
 
     let global = {
       let scope = &mut rt.handle_scope();
@@ -126,16 +140,3 @@ impl Runtime {
     Ok(result)
   }
 }
-
-#[cfg(feature = "op")]
-const BOILERPLATE: &str = r#"
-window.addEventListener("__start", async () => {
-    const argument = await Deno.core.opAsync("op_recv_args");
-    const result = await __fn(argument);
-    Deno.core.opAsync("op_result", result);
-"#;
-
-#[cfg(feature = "rusty_v8")]
-const BOILERPLATE: &str = r#"
-globalThis.mod = mod;
-"#;
