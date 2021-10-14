@@ -24,8 +24,8 @@ async fn main() -> Result<(), AnyError> {
     .to_string_lossy()
     .to_string();
 
-  let mut rt = Runtime::new("hello", &js_path)?;
-  let value: [ApiResponse; 2] = rt.call(&[5, 4]).await?;
+  let mut rt = Runtime::new(&js_path).await?;
+  let value: [ApiResponse; 2] = rt.call("hello", &[5, 4]).await?;
 
   println!("Basic: {:#?}", value);
 
@@ -34,14 +34,17 @@ async fn main() -> Result<(), AnyError> {
     .to_string_lossy()
     .to_string();
 
-  let mut rt = Runtime::new("handler", &js_path)?;
+  let mut rt = Runtime::new(&js_path).await?;
 
   // Multi typed argument and return values.
   let value: Vec<Value> = rt
-    .call(&[
-      Value::String("Hello there".to_string()),
-      Value::Number(100.into()),
-    ])
+    .call(
+      "handler",
+      &[
+        Value::String("Hello there".to_string()),
+        Value::Number(100.into()),
+      ],
+    )
     .await?;
 
   println!("Heterogeneous: {:#?}", value);

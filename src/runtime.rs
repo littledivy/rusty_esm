@@ -27,17 +27,13 @@ fn get_error_class_name(e: &AnyError) -> &'static str {
 
 pub struct Runtime {
   worker: MainWorker,
-  options: WorkerOptions,
-  module: ModuleSpecifier,
 }
 
 impl Runtime {
-  pub fn new(fn_name: &str, source_file: &str) -> Result<Self, AnyError> {
+  pub async fn new(source_file: &str) -> Result<Self, AnyError> {
     let specifier = "file:///main.js".to_string();
-    let source = format!(
-      "import {{ {} as __fn }} from '{}';{}",
-      fn_name, source_file, BOILERPLATE
-    );
+    let source =
+      format!("import * as mod from '{}';{}", source_file, BOILERPLATE);
 
     let module_loader = Rc::new(EmbeddedModuleLoader(
       source,
@@ -80,99 +76,27 @@ impl Runtime {
     let main_module = deno_core::resolve_url(&specifier)?;
     let permissions = Permissions::allow_all();
 
-    let worker =
+    let mut worker =
       MainWorker::from_options(main_module.clone(), permissions, &options);
 
-    Ok(Self {
-      worker,
-      options,
-      module: main_module,
-    })
+    worker.bootstrap(&options);
+    worker.execute_main_module(&main_module).await?;
+
+    Ok(Self { worker })
   }
 
-  #[cfg(feature = "op")]
-  pub async fn call<R, T>(&mut self, argument: R) -> Result<T, AnyError>
+  pub async fn call<R, T>(
+    &mut self,
+    fn_name: &str,
+    arguments: &[R],
+  ) -> Result<T, AnyError>
   where
     R: Serialize + 'static,
     T: Debug + DeserializeOwned + 'static,
   {
-    {
-      let rt = &mut self.worker.js_runtime;
-
-      async fn op_recv_args<R>(
-        state: Rc<RefCell<OpState>>,
-        _args: (),
-        _: (),
-      ) -> Result<R, AnyError>
-      where
-        R: Serialize + 'static,
-      {
-        let mut state = state.borrow_mut();
-        let args = state.take::<R>();
-        Ok(args)
-      }
-
-      async fn op_result<T>(
-        state: Rc<RefCell<OpState>>,
-        args: T,
-        _: (),
-      ) -> Result<(), AnyError>
-      where
-        T: Debug + DeserializeOwned + 'static,
-      {
-        let tx = {
-          let mut state = state.borrow_mut();
-          let tx = state.take::<Sender<T>>();
-
-          tx
-        };
-        tx.send(args).await.unwrap();
-        Ok(())
-      }
-
-      reg_async(rt, "op_recv_args", op_recv_args::<R>);
-      reg_async(rt, "op_result", op_result::<T>);
-      rt.sync_ops_cache();
-    }
-
-    self.worker.bootstrap(&self.options);
-    self.worker.execute_main_module(&self.module).await?;
-
-    let (tx, mut rx) = mpsc::channel::<T>(16);
-
-    {
-      let rt = &mut self.worker.js_runtime;
-
-      rt.execute_script(
-        "<anon>",
-        "window.dispatchEvent(new CustomEvent('__start'))",
-      )
-      .unwrap();
-
-      rt.op_state().borrow_mut().put::<Sender<T>>(tx.clone());
-      rt.op_state().borrow_mut().put::<R>(argument);
-    }
-
-    self.worker.run_event_loop(false).await?;
-    let result = rx.recv().await.unwrap();
-
-    Ok(result)
-  }
-
-  #[cfg(feature = "rusty_v8")]
-  pub async fn call<R, T>(&mut self, arguments: &[R]) -> Result<T, AnyError>
-  where
-    R: Serialize + 'static,
-    T: Debug + DeserializeOwned + 'static,
-  {
-    use std::task::Poll;
-
-    self.worker.bootstrap(&self.options);
-    self.worker.execute_main_module(&self.module).await?;
-
     let rt = &mut self.worker.js_runtime;
 
-    let func = rt.execute_script("<anon>", "__fn")?;
+    let func = rt.execute_script("<anon>", &format!("mod.{}", fn_name))?;
 
     let global = {
       let scope = &mut rt.handle_scope();
@@ -213,5 +137,5 @@ window.addEventListener("__start", async () => {
 
 #[cfg(feature = "rusty_v8")]
 const BOILERPLATE: &str = r#"
-globalThis.__fn = __fn;
+globalThis.mod = mod;
 "#;
