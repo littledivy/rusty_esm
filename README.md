@@ -1,3 +1,8 @@
+## rusty_esm
+
+This is an example showcasing a common use case for embedding Deno - calling JS
+module exports from Rust. The rest is pretty self explainatory:
+
 ```rust
 // main.rs
 #[derive(Debug, Deserialize)]
@@ -30,3 +35,16 @@ ApiResponse {
     completed: false,
 }
 ```
+
+### Benchmarks
+
+Measured for `Runtime::call` in example scenarios. See `src/main.rs`.
+
+```shell
+test tests::bench_call         ... bench:       4,429 ns/iter (+/- 1,139)
+test tests::bench_call_promise ... bench:       4,609 ns/iter (+/- 306)
+```
+
+#### License
+
+MIT

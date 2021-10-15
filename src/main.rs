@@ -1,3 +1,6 @@
+#![feature(test)]
+extern crate test;
+
 pub(crate) mod module_loader;
 pub mod runtime;
 
@@ -63,4 +66,48 @@ async fn main() -> Result<(), AnyError> {
   );
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+  use super::*;
+  use test::Bencher;
+
+  #[bench]
+  fn bench_call(b: &mut Bencher) {
+    let js_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("examples/multi_export.js")
+      .to_string_lossy()
+      .to_string();
+    let tokio_rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .unwrap();
+    let mut rt = tokio_rt.block_on(Runtime::new(&js_path)).unwrap();
+
+    b.iter(|| {
+      tokio_rt
+        .block_on(rt.call::<_, usize>("sum", &[1, 2]))
+        .unwrap();
+    });
+  }
+
+  #[bench]
+  fn bench_call_promise(b: &mut Bencher) {
+    let js_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("examples/async.js")
+      .to_string_lossy()
+      .to_string();
+    let tokio_rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .unwrap();
+    let mut rt = tokio_rt.block_on(Runtime::new(&js_path)).unwrap();
+    b.iter(|| {
+      tokio_rt
+        .block_on(rt.call::<(), bool>("bench", &[]))
+        .unwrap();
+    });
+  }
 }

@@ -4,3 +4,7 @@ export async function hello(id, id2) {
   const r2 = await fetch("https://jsonplaceholder.typicode.com/todos/" + id2);
   return await Promise.all([r1.json(), r2.json()]);
 }
+
+export async function bench() {
+  return Promise.resolve(true);
+}
